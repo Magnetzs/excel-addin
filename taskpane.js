@@ -1,10 +1,14 @@
 // ============================================================
-// TIMESTAMP UTILITY — Excel Add-in v2.2
+// TIMESTAMP UTILITY — Excel Add-in v2.3
+// Optimizēts bulk operācijām — viens context.sync visam
 // ============================================================
 
 const SETTINGS_KEY_PREFIX = "timestamp_settings_";
 let registeredSheets = new Set();
 let currentSheetName = "";
+let pendingChanges = new Map(); // debounce buferis
+let debounceTimer = null;
+const DEBOUNCE_MS = 600; // gaida kamēr lietotājs beidz rakstīt
 
 Office.onReady(async (info) => {
   if (info.host !== Office.HostType.Excel) return;
@@ -12,6 +16,10 @@ Office.onReady(async (info) => {
   document.getElementById("saveBtn").onclick = saveSettings;
   await registerAllSheetListeners();
 });
+
+// ============================================================
+// IESTATĪJUMU IELĀDE UN SAGLABĀŠANA
+// ============================================================
 
 async function loadCurrentSheetSettings() {
   try {
@@ -53,7 +61,6 @@ async function saveSettings() {
       currentSheetName = sheet.name;
       document.getElementById("sheetInfo").textContent = "Darblapa: " + currentSheetName;
     });
-
     saveSheetSettings(currentSheetName, { triggerCol, dateCol, timeCol });
     await registerAllSheetListeners();
     showStatus("✅ Saglabāts! Ievadi + kolonnā " + triggerCol, "success");
@@ -63,7 +70,9 @@ async function saveSettings() {
   }
 }
 
-// --- Storage (localStorage) ---
+// ============================================================
+// STORAGE
+// ============================================================
 
 function getSettingsKey(sheetName) {
   return SETTINGS_KEY_PREFIX + sheetName.replace(/[^a-zA-Z0-9]/g, "_");
@@ -82,7 +91,9 @@ function getSheetSettings(sheetName) {
   } catch (e) { return null; }
 }
 
-// --- Klausītāji ---
+// ============================================================
+// KLAUSĪTĀJI
+// ============================================================
 
 async function registerAllSheetListeners() {
   try {
@@ -94,7 +105,6 @@ async function registerAllSheetListeners() {
         if (!registeredSheets.has(sheet.name)) {
           sheet.onChanged.add(handleChange);
           registeredSheets.add(sheet.name);
-          console.log("Klausītājs reģistrēts: " + sheet.name);
         }
       }
       await context.sync();
@@ -106,71 +116,156 @@ async function registerAllSheetListeners() {
   }
 }
 
-// --- Galvenā loģika ---
+// ============================================================
+// GALVENĀ LOĢIKA — DEBOUNCE + BULK
+// ============================================================
 
 async function handleChange(event) {
   if (event.changeType !== "RangeEdited") return;
 
-  await Excel.run(async (context) => {
-    const sheet = context.workbook.worksheets.getActiveWorksheet();
-    sheet.load("name");
-    await context.sync();
+  // Iegūst adresi un darblapas nosaukumu
+  let address = event.address;
+  if (address.includes("!")) address = address.split("!")[1];
+  address = address.replace(/\$/g, "");
 
-    const sheetName = sheet.name;
-    const settings = getSheetSettings(sheetName);
-    if (!settings) { console.log("Nav iestatījumu: " + sheetName); return; }
-
-    const { triggerCol, dateCol, timeCol } = settings;
-
-    let address = event.address;
-    if (address.includes("!")) address = address.split("!")[1];
-    address = address.replace(/\$/g, "");
-
-    const firstCell = address.split(":")[0];
-    const colLetter = firstCell.replace(/[0-9]/g, "").toUpperCase();
-
-    console.log("Izmaiņa: " + address + " | Kolonna: " + colLetter + " | Trigera: " + triggerCol);
-
-    if (colLetter !== triggerCol) return;
-
-    const changedRange = sheet.getRange(address);
-    changedRange.load(["values", "rowIndex", "rowCount"]);
-    await context.sync();
-
-    const now = new Date();
-    const excelDate = dateToExcelSerial(now);
-    const excelTime = timeToExcelSerial(now);
-
-    for (let i = 0; i < changedRange.rowCount; i++) {
-      const rawVal = changedRange.values[i][0];
-      const cellValue = String(rawVal === null || rawVal === undefined ? "" : rawVal).trim();
-      console.log("Rinda " + (changedRange.rowIndex + i + 1) + ": '" + cellValue + "'");
-      if (cellValue !== "+") continue;
-
-      const rowNumber  = changedRange.rowIndex + i + 1;
-      const dateCell   = sheet.getRange(dateCol + rowNumber);
-      const timeCell   = sheet.getRange(timeCol + rowNumber);
-      dateCell.load("values");
-      timeCell.load("values");
+  // Iegūst darblapas nosaukumu no event
+  let sheetName = "";
+  try {
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      sheet.load("name");
       await context.sync();
+      sheetName = sheet.name;
+    });
+  } catch (e) { return; }
 
-      const existingDate = String(dateCell.values[0][0]).trim();
-      if (existingDate !== "" && existingDate !== "0" && existingDate !== "false") {
-        console.log("Datums jau ir rindā " + rowNumber); continue;
-      }
+  const settings = getSheetSettings(sheetName);
+  if (!settings) return;
 
-      dateCell.values       = [[excelDate]];
-      dateCell.numberFormat = [["dd.mm.yyyy"]];
-      timeCell.values       = [[excelTime]];
-      timeCell.numberFormat = [["hh:mm"]];
-      console.log("✅ Ierakstīts rindā " + rowNumber);
-    }
+  // Pārbauda vai izmaiņa ir trigera kolonnā
+  const firstCell = address.split(":")[0];
+  const colLetter = firstCell.replace(/[0-9]/g, "").toUpperCase();
+  if (colLetter !== settings.triggerCol) return;
 
-    await context.sync();
-  }).catch((e) => console.error("handleChange kļūda:", e));
+  // Pievieno buferim
+  const key = sheetName + "|" + address;
+  pendingChanges.set(key, { sheetName, address, settings });
+
+  // Debounce — gaida 600ms pēc pēdējās izmaiņas
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(processPendingChanges, DEBOUNCE_MS);
 }
 
-// --- Datuma/laika konvertācija ---
+// ============================================================
+// APSTRĀDĀ VISAS BUFERĒTĀS IZMAIŅAS VIENĀ REIZĒ
+// ============================================================
+
+async function processPendingChanges() {
+  if (pendingChanges.size === 0) return;
+
+  const changes = new Map(pendingChanges);
+  pendingChanges.clear();
+
+  // Grupē pēc darblapas
+  const bySheet = new Map();
+  for (const [, change] of changes) {
+    if (!bySheet.has(change.sheetName)) {
+      bySheet.set(change.sheetName, []);
+    }
+    bySheet.get(change.sheetName).push(change);
+  }
+
+  for (const [sheetName, sheetChanges] of bySheet) {
+    await processSheetChanges(sheetName, sheetChanges);
+  }
+}
+
+async function processSheetChanges(sheetName, changes) {
+  try {
+    await Excel.run(async (context) => {
+      const sheet = context.workbook.worksheets.getActiveWorksheet();
+      sheet.load("name");
+      await context.sync();
+
+      const settings = getSheetSettings(sheetName);
+      if (!settings) return;
+
+      const { triggerCol, dateCol, timeCol } = settings;
+
+      // Ielādē VISAS trigera šūnas uzreiz
+      const allRanges = [];
+      for (const change of changes) {
+        const range = sheet.getRange(change.address);
+        range.load(["values", "rowIndex", "rowCount"]);
+        allRanges.push({ range, address: change.address });
+      }
+
+      await context.sync();
+
+      // Savāc visas rindas kur ir "+"
+      const rowsToProcess = [];
+      for (const { range } of allRanges) {
+        for (let i = 0; i < range.rowCount; i++) {
+          const rawVal = range.values[i][0];
+          const cellValue = String(rawVal === null || rawVal === undefined ? "" : rawVal).trim();
+          if (cellValue !== "+") continue;
+          rowsToProcess.push(range.rowIndex + i + 1);
+        }
+      }
+
+      if (rowsToProcess.length === 0) return;
+
+      // Ielādē VISAS mērķa šūnas uzreiz (viens sync)
+      const dateCells = rowsToProcess.map(r => {
+        const c = sheet.getRange(dateCol + r);
+        c.load("values");
+        return c;
+      });
+      const timeCells = rowsToProcess.map(r => {
+        const c = sheet.getRange(timeCol + r);
+        c.load("values");
+        return c;
+      });
+
+      await context.sync();
+
+      // Aprēķina datumu/laiku vienreiz
+      const now = new Date();
+      const excelDate = dateToExcelSerial(now);
+      const excelTime = timeToExcelSerial(now);
+
+      // Ieraksta VISAS vērtības (bez papildu sync)
+      let count = 0;
+      for (let i = 0; i < rowsToProcess.length; i++) {
+        const existingDate = String(dateCells[i].values[0][0]).trim();
+        if (existingDate !== "" && existingDate !== "0" && existingDate !== "false") continue;
+
+        dateCells[i].values       = [[excelDate]];
+        dateCells[i].numberFormat = [["dd.mm.yyyy"]];
+        timeCells[i].values       = [[excelTime]];
+        timeCells[i].numberFormat = [["hh:mm"]];
+        count++;
+      }
+
+      // VIENS sync visām izmaiņām
+      await context.sync();
+      console.log("✅ Ierakstīts " + count + " rinda(s) darblapā: " + sheetName);
+
+    });
+  } catch (e) {
+    // Ja Excel vēl editing mode — mēģina vēlreiz pēc 1 sekundes
+    if (e.message && e.message.includes("cell-editing mode")) {
+      console.log("Excel editing mode, mēģina vēlreiz...");
+      setTimeout(() => processSheetChanges(sheetName, changes), 1000);
+    } else {
+      console.error("processSheetChanges kļūda:", e);
+    }
+  }
+}
+
+// ============================================================
+// DATUMA UN LAIKA KONVERTĀCIJA
+// ============================================================
 
 function dateToExcelSerial(date) {
   const excelEpoch = new Date(Date.UTC(1899, 11, 30));
@@ -182,7 +277,9 @@ function timeToExcelSerial(date) {
   return (date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds()) / 86400;
 }
 
-// --- UI ---
+// ============================================================
+// UI
+// ============================================================
 
 function showStatus(message, type) {
   const el = document.getElementById("status");
