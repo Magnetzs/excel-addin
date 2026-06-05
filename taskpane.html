@@ -8,51 +8,119 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #f3f2f1;
-      color: #323130;
-      padding: 16px;
-      font-size: 14px;
+    :root {
+      --brand-green:  #135064;
+      --brand-gold:   #cfb89b;
+      --brand-dark:   #0d3a48;
+      --brand-light:  #e8f0f2;
+      --brand-gold-light: #f5ede3;
     }
 
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f5f4f3;
+      color: #1e1e1e;
+      font-size: 14px;
+      overflow-x: hidden;
+      position: relative;
+      min-height: 100vh;
+    }
+
+    /* ---- WATERMARK ---- */
+    .watermark {
+      position: fixed;
+      bottom: 8px;
+      right: 10px;
+      font-size: 9px;
+      color: #135064;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      pointer-events: none;
+      user-select: none;
+      z-index: 0;
+    }
+
+    /* ---- HEADER ---- */
     .header {
-      background: #107c41;
+      background: var(--brand-green);
       color: white;
-      padding: 12px 16px;
-      margin: -16px -16px 16px -16px;
-      font-size: 15px;
-      font-weight: 600;
+      padding: 9px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 2px solid var(--brand-gold);
+    }
+
+    .header-left {
       display: flex;
       align-items: center;
       gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
     }
 
-    .header span { font-size: 18px; }
+    .header-left span { font-size: 16px; }
+
+    .btn-minimize {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.25);
+      color: white;
+      width: 26px;
+      height: 26px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s;
+    }
+
+    .btn-minimize:hover { background: rgba(255,255,255,0.3); }
+
+    /* ---- MINIMIZĒTS ---- */
+    body.minimized .content { display: none; }
+
+    .mini-status {
+      display: none;
+      background: var(--brand-dark);
+      color: var(--brand-gold);
+      font-size: 11px;
+      padding: 5px 12px;
+      text-align: center;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    body.minimized .mini-status { display: block; }
+
+    /* ---- SATURS ---- */
+    .content { padding: 14px; position: relative; z-index: 1; }
 
     .sheet-info {
-      background: #e8f5e9;
-      border-left: 3px solid #107c41;
-      padding: 8px 12px;
-      margin-bottom: 16px;
+      background: var(--brand-light);
+      border-left: 3px solid var(--brand-green);
+      padding: 7px 10px;
+      margin-bottom: 14px;
       font-size: 12px;
-      color: #107c41;
-      font-weight: 600;
+      color: var(--brand-green);
+      font-weight: 700;
       border-radius: 0 4px 4px 0;
     }
 
-    .field {
-      margin-bottom: 14px;
-    }
+    .field { margin-bottom: 12px; }
 
     label {
       display: block;
       margin-bottom: 4px;
-      font-weight: 600;
-      font-size: 12px;
-      color: #605e5c;
+      font-weight: 700;
+      font-size: 11px;
+      color: var(--brand-green);
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.4px;
     }
 
     .input-row {
@@ -61,63 +129,63 @@
       gap: 8px;
     }
 
-    .input-icon {
-      font-size: 16px;
-      width: 24px;
-      text-align: center;
-    }
+    .input-icon { font-size: 15px; width: 22px; text-align: center; }
 
     input[type="text"] {
       flex: 1;
-      padding: 8px 10px;
-      border: 1px solid #a19f9d;
+      padding: 7px 10px;
+      border: 1px solid var(--brand-gold);
       border-radius: 3px;
       font-size: 14px;
       font-family: 'Segoe UI', sans-serif;
       text-transform: uppercase;
       background: white;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      color: #1e1e1e;
     }
 
     input[type="text"]:focus {
-      border-color: #107c41;
+      border-color: var(--brand-green);
       outline: none;
-      box-shadow: 0 0 0 1px #107c41;
+      box-shadow: 0 0 0 1px var(--brand-green);
     }
 
     .hint {
       font-size: 11px;
       color: #a19f9d;
       margin-top: 3px;
-      margin-left: 32px;
+      margin-left: 30px;
     }
 
-    .divider {
+    hr {
       border: none;
-      border-top: 1px solid #edebe9;
-      margin: 16px 0;
+      border-top: 1px solid var(--brand-gold);
+      margin: 14px 0;
+      opacity: 0.5;
     }
 
     .btn-save {
       width: 100%;
-      padding: 10px;
-      background: #107c41;
+      padding: 9px;
+      background: var(--brand-green);
       color: white;
       border: none;
       border-radius: 3px;
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
       font-family: 'Segoe UI', sans-serif;
+      letter-spacing: 0.2px;
       transition: background 0.15s;
+      border-bottom: 2px solid var(--brand-gold);
     }
 
-    .btn-save:hover { background: #0b5930; }
-    .btn-save:active { background: #094d28; }
+    .btn-save:hover { background: var(--brand-dark); }
+    .btn-save:active { background: #091f27; }
 
     .status {
       margin-top: 10px;
-      padding: 8px 12px;
+      padding: 7px 10px;
       border-radius: 3px;
       font-size: 12px;
       font-weight: 600;
@@ -126,9 +194,9 @@
     }
 
     .status.success {
-      background: #e8f5e9;
-      color: #107c41;
-      border: 1px solid #107c41;
+      background: var(--brand-light);
+      color: var(--brand-green);
+      border: 1px solid var(--brand-green);
       display: block;
     }
 
@@ -139,81 +207,97 @@
       display: block;
     }
 
-    .status.info {
-      background: #e8f4fd;
-      color: #005a9e;
-      border: 1px solid #005a9e;
-      display: block;
-    }
-
     .listener-status {
       margin-top: 12px;
-      padding: 8px 12px;
+      padding: 7px 10px;
       border-radius: 3px;
-      font-size: 12px;
-      background: #f3f2f1;
-      border: 1px solid #edebe9;
+      font-size: 11px;
+      background: var(--brand-gold-light);
+      border: 1px solid var(--brand-gold);
       display: flex;
       align-items: center;
       gap: 6px;
+      color: #5a4a3a;
     }
 
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #a19f9d;
-      flex-shrink: 0;
-    }
-
-    .dot.active { background: #107c41; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #a19f9d; }
+    .dot.active   { background: var(--brand-green); }
     .dot.inactive { background: #a80000; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <span>⏱</span> Timestamp Utility
-  </div>
 
-  <div class="sheet-info" id="sheetInfo">Ielādē...</div>
-
-  <div class="field">
-    <label>Trigera kolonna</label>
-    <div class="input-row">
-      <span class="input-icon">＋</span>
-      <input type="text" id="triggerCol" placeholder="Piem. A" maxlength="3"/>
+  <div class="header" onclick="toggleMinimize()">
+    <div class="header-left">
+      <span>⏱</span> Timestamp Utility
     </div>
-    <div class="hint">Šūnā ievadot +, tiks reģistrēts datums un laiks</div>
+    <button class="btn-minimize" id="minBtn" title="Minimizēt"
+            onclick="event.stopPropagation(); toggleMinimize()">─</button>
   </div>
 
-  <div class="field">
-    <label>Datuma kolonna</label>
-    <div class="input-row">
-      <span class="input-icon">📅</span>
-      <input type="text" id="dateCol" placeholder="Piem. B" maxlength="3"/>
+  <div class="mini-status" id="miniStatus">Klausītājs aktīvs</div>
+
+  <div class="content">
+    <div class="sheet-info" id="sheetInfo">Ielādē...</div>
+
+    <div class="field">
+      <label>Trigera kolonna</label>
+      <div class="input-row">
+        <span class="input-icon">＋</span>
+        <input type="text" id="triggerCol" placeholder="Piem. A" maxlength="3"/>
+      </div>
+      <div class="hint">Ievadot +, reģistrē datumu un laiku</div>
     </div>
-    <div class="hint">Formāts: dd.mm.yyyy</div>
-  </div>
 
-  <div class="field">
-    <label>Laika kolonna</label>
-    <div class="input-row">
-      <span class="input-icon">🕐</span>
-      <input type="text" id="timeCol" placeholder="Piem. C" maxlength="3"/>
+    <div class="field">
+      <label>Datuma kolonna</label>
+      <div class="input-row">
+        <span class="input-icon">📅</span>
+        <input type="text" id="dateCol" placeholder="Piem. B" maxlength="3"/>
+      </div>
+      <div class="hint">Formāts: dd.mm.yyyy</div>
     </div>
-    <div class="hint">Formāts: hh:mm</div>
+
+    <div class="field">
+      <label>Laika kolonna</label>
+      <div class="input-row">
+        <span class="input-icon">🕐</span>
+        <input type="text" id="timeCol" placeholder="Piem. C" maxlength="3"/>
+      </div>
+      <div class="hint">Formāts: hh:mm</div>
+    </div>
+
+    <hr/>
+
+    <button class="btn-save" id="saveBtn">💾 Saglabāt iestatījumus</button>
+    <div class="status" id="status"></div>
+
+    <div class="listener-status">
+      <div class="dot" id="listenerDot"></div>
+      <span id="listenerText">Pārbauda...</span>
+    </div>
   </div>
 
-  <hr class="divider"/>
+  <div class="watermark">made by Valdemārs</div>
 
-  <button class="btn-save" id="saveBtn">💾 Saglabāt iestatījumus</button>
+  <script>
+    function toggleMinimize() {
+      const body = document.body;
+      const btn  = document.getElementById("minBtn");
+      const mini = document.getElementById("miniStatus");
 
-  <div class="status" id="status"></div>
-
-  <div class="listener-status">
-    <div class="dot" id="listenerDot"></div>
-    <span id="listenerText">Pārbauda klausītāja statusu...</span>
-  </div>
+      if (body.classList.contains("minimized")) {
+        body.classList.remove("minimized");
+        btn.textContent = "─";
+        btn.title = "Minimizēt";
+      } else {
+        body.classList.add("minimized");
+        btn.textContent = "▶";
+        btn.title = "Atjaunot";
+        mini.textContent = document.getElementById("listenerText").textContent;
+      }
+    }
+  </script>
 
   <script src="taskpane.js" defer></script>
 </body>
