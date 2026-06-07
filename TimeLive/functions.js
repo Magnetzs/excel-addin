@@ -1,48 +1,48 @@
 // ============================================================
-// ZAZA TIMBER — Timestamp Add-in (Shared Runtime)
-// Fona darbība — bez UI
+// ZAZA TIMBER — Timestamp Add-in v1.1
+// Shared Runtime — fona darbība
 // ============================================================
 
-// Lapu konfigurācija: trigera kolonna AJ ir fiksēta visām lapām
-// Katrai lapai atšķirīgas mērķa kolonnas datumam un laikam
 const SHEET_CONFIG = {
-  "AUDZESANA":                   { dateCol: "AX", timeCol: "AY" },
-  "ČETRPUSĪGĀ_ĒVELE_LĪMĒŠANA":  { dateCol: "AZ", timeCol: "BA" },
-  "BIEZUMĒVELE":                 { dateCol: "AW", timeCol: "AX" },
-  "CNC":                         { dateCol: "BC", timeCol: "BD" }
+  "AUDZESANA":                  { dateCol: "AX", timeCol: "AY" },
+  "ČETRPUSĪGĀ_ĒVELE_LĪMĒŠANA": { dateCol: "AZ", timeCol: "BA" },
+  "BIEZUMĒVELE":                { dateCol: "AW", timeCol: "AX" },
+  "CNC":                        { dateCol: "BC", timeCol: "BD" }
 };
 
 const TRIGGER_COL = "AJ";
-let isProcessing = false; // Infinite loop aizsardzība
+let isProcessing = false;
+let listenerRegistered = false;
 
 // ============================================================
-// AUTO-START — aktivizējas pēc dokumenta atvēršanas
+// INICIALIZĀCIJA
 // ============================================================
 
-Office.onReady(async () => {
-  await registerGlobalListener();
+Office.onReady(async (info) => {
+  console.log("ZAZA: Office.onReady - host:", info.host);
+  if (info.host === Office.HostType.Excel) {
+    await registerGlobalListener();
+  }
 });
 
-// WorkbookActivated event (Shared Runtime)
-async function onWorkbookActivated(event) {
-  await registerGlobalListener();
-  event.completed();
-}
-
 // ============================================================
-// REĢISTRĒ GLOBĀLO KLAUSĪTĀJU VISAI DARBGRĀMATAI
+// REĢISTRĒ GLOBĀLO KLAUSĪTĀJU
 // ============================================================
 
 async function registerGlobalListener() {
+  if (listenerRegistered) {
+    console.log("ZAZA: Klausītājs jau reģistrēts.");
+    return;
+  }
   try {
     await Excel.run(async (context) => {
-      // Globāls klausītājs — visas lapas vienlaicīgi
       context.workbook.worksheets.onChanged.add(handleChange);
       await context.sync();
-      console.log("ZAZA Timestamp: globālais klausītājs aktīvs.");
+      listenerRegistered = true;
+      console.log("ZAZA: ✅ Globālais klausītājs aktīvs.");
     });
   } catch (e) {
-    console.error("ZAZA Timestamp: kļūda reģistrējot klausītāju:", e);
+    console.error("ZAZA: Kļūda reģistrējot klausītāju:", e);
   }
 }
 
@@ -51,12 +51,10 @@ async function registerGlobalListener() {
 // ============================================================
 
 async function handleChange(event) {
-  // --- INFINITE LOOP AIZSARDZĪBA ---
-  // Ja kods pats raksta šūnās, tas izsauc jaunu onChanged.
-  // isProcessing flag nodrošina ka mēs ignorējam savus pašu rakstus.
+  // Infinite loop aizsardzība
   if (isProcessing) return;
 
-  // Pieņem tikai tiešu lietotāja ievadi
+  // Tikai lietotāja ievade
   if (event.changeType !== "RangeEdited") return;
 
   // Notīra adresi
@@ -64,10 +62,12 @@ async function handleChange(event) {
   if (address.includes("!")) address = address.split("!")[1];
   address = address.replace(/\$/g, "");
 
-  // Pārbauda vai izmaiņa ir tieši AJ kolonnā
-  const firstCell  = address.split(":")[0];
-  const colLetter  = firstCell.replace(/[0-9]/g, "").toUpperCase();
+  // Pārbauda vai kolonna ir AJ
+  const firstCell = address.split(":")[0];
+  const colLetter = firstCell.replace(/[0-9]/g, "").toUpperCase();
   if (colLetter !== TRIGGER_COL) return;
+
+  console.log("ZAZA: Izmaiņa AJ kolonnā — adrese: " + address);
 
   await Excel.run(async (context) => {
     // Iegūst lapas nosaukumu
@@ -76,17 +76,20 @@ async function handleChange(event) {
     await context.sync();
 
     const sheetName = sheet.name.trim();
-    const config    = SHEET_CONFIG[sheetName];
+    console.log("ZAZA: Lapa — " + sheetName);
 
-    // Ignorē lapas kas nav konfigurācijā
-    if (!config) return;
+    const config = SHEET_CONFIG[sheetName];
+    if (!config) {
+      console.log("ZAZA: Lapa nav konfigurēta — ignorē.");
+      return;
+    }
 
-    // Ielādē mainītā diapazona vērtības
+    // Ielādē mainītās šūnas
     const changedRange = sheet.getRange(address);
     changedRange.load(["values", "rowIndex", "rowCount"]);
     await context.sync();
 
-    // Savāc rindas kur vērtība ir tieši "+"
+    // Savāc rindas ar "+"
     const rowsToProcess = [];
     for (let i = 0; i < changedRange.rowCount; i++) {
       const raw = changedRange.values[i][0];
@@ -96,52 +99,62 @@ async function handleChange(event) {
       }
     }
 
-    if (rowsToProcess.length === 0) return;
+    if (rowsToProcess.length === 0) {
+      console.log("ZAZA: Nav '+' vērtību — ignorē.");
+      return;
+    }
 
-    // Iegūst pašreizējo datumu un laiku KĀ TEKSTU
-    const now         = new Date();
-    const dateText    = formatDate(now);  // DD.MM.YYYY
-    const timeText    = formatTime(now);  // HH:MM:SS
+    console.log("ZAZA: Apstrādā " + rowsToProcess.length + " rind(as): " + rowsToProcess.join(", "));
 
-    // --- RAKSTA VĒRTĪBAS (aizsargāts bloks) ---
+    // Datums un laiks kā teksts
+    const now      = new Date();
+    const dateText = formatDate(now);
+    const timeText = formatTime(now);
+
+    // Raksta vērtības
     isProcessing = true;
     try {
       for (const rowNum of rowsToProcess) {
-        // Pārbauda vai mērķa šūnas jau ir aizpildītas
         const dateCell = sheet.getRange(config.dateCol + rowNum);
         const timeCell = sheet.getRange(config.timeCol + rowNum);
         dateCell.load("values");
         timeCell.load("values");
         await context.sync();
 
-        const existingDate = String(dateCell.values[0][0]).trim();
-        // Ja datums jau ir — nelabojam (aizsardzība pret pārrakstīšanu)
-        if (existingDate !== "" && existingDate !== "0" && existingDate !== "false") {
-          console.log("ZAZA: Datums jau eksistē rindā " + rowNum + ", izlaižam.");
+        // Pārbauda vai jau ir dati
+        const existingVal = String(dateCell.values[0][0]).trim();
+        if (existingVal !== "" && existingVal !== "0" && existingVal !== "false") {
+          console.log("ZAZA: Rinda " + rowNum + " — datums jau eksistē, izlaižam.");
           continue;
         }
 
-        // Ieraksta datumu un laiku kā tekstu
+        // Ieraksta
         dateCell.values = [[dateText]];
         timeCell.values = [[timeText]];
-
-        console.log("ZAZA: ✅ " + sheetName + " rinda " + rowNum +
-          " → " + config.dateCol + "=" + dateText +
-          ", " + config.timeCol + "=" + timeText);
+        console.log("ZAZA: ✅ Rinda " + rowNum + " → " + config.dateCol + "=" + dateText + " | " + config.timeCol + "=" + timeText);
       }
       await context.sync();
     } finally {
-      // Vienmēr atbrīvo flag — pat ja kļūda
       isProcessing = false;
     }
+
   }).catch((e) => {
     isProcessing = false;
-    console.error("ZAZA handleChange kļūda:", e);
+    console.error("ZAZA: handleChange kļūda:", e);
   });
 }
 
 // ============================================================
-// DATUMA UN LAIKA FORMATĒŠANA KĀ TEKSTS
+// STATUS FUNKCIJA (ribbon poga)
+// ============================================================
+
+function showStatus(event) {
+  console.log("ZAZA Timestamp aktīvs. Konfigurētās lapas: " + Object.keys(SHEET_CONFIG).join(", "));
+  if (event && event.completed) event.completed();
+}
+
+// ============================================================
+// DATUMA UN LAIKA FORMATĒŠANA
 // ============================================================
 
 function formatDate(date) {
@@ -156,23 +169,4 @@ function formatTime(date) {
   const mi = String(date.getMinutes()).padStart(2, "0");
   const s  = String(date.getSeconds()).padStart(2, "0");
   return h + ":" + mi + ":" + s;
-}
-
-// ============================================================
-// STATUS POGA (redzama ribbon josla — pēc vajadzības)
-// ============================================================
-
-async function showStatus(event) {
-  await Excel.run(async (context) => {
-    const sheet = context.workbook.worksheets.getActiveWorksheet();
-    sheet.load("name");
-    await context.sync();
-    const sheetName = sheet.name.trim();
-    const config    = SHEET_CONFIG[sheetName];
-    const msg = config
-      ? "✅ ZAZA Timestamp aktīvs\nLapa: " + sheetName + "\nDatums → " + config.dateCol + " | Laiks → " + config.timeCol
-      : "⚠️ Lapa '" + sheetName + "' nav konfigurēta.\nKonfigurētās lapas: " + Object.keys(SHEET_CONFIG).join(", ");
-    console.log(msg);
-  });
-  event.completed();
 }
