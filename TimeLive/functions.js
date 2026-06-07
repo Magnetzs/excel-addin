@@ -1,16 +1,23 @@
 // ============================================================
-// ZAZA TIMBER — Timestamp Add-in v1.1
+// ZAZA TIMBER — Timestamp Add-in v1.2
 // Shared Runtime — fona darbība
 // ============================================================
 
-const SHEET_CONFIG = {
-  "AUDZESANA":                  { dateCol: "AX", timeCol: "AY" },
-  "ČETRPUSĪGĀ_ĒVELE_LĪMĒŠANA": { dateCol: "AZ", timeCol: "BA" },
-  "BIEZUMĒVELE":                { dateCol: "AW", timeCol: "AX" },
-  "CNC":                        { dateCol: "BC", timeCol: "BD" }
+// Konfigurācija lapām ar vienu trigera kolonnu (AJ)
+const SINGLE_TRIGGER_CONFIG = {
+  "AUDZESANA":                  { triggerCol: "AJ", dateCol: "AX", timeCol: "AY" },
+  "ČETRPUSĪGĀ_ĒVELE_LĪMĒŠANA": { triggerCol: "AJ", dateCol: "AZ", timeCol: "BA" },
+  "BIEZUMĒVELE":                { triggerCol: "AJ", dateCol: "AW", timeCol: "AX" },
+  "CNC":                        { triggerCol: "AJ", dateCol: "BC", timeCol: "BD" }
 };
 
-const TRIGGER_COL = "AJ";
+// Konfigurācija lapām ar vairākām trigera kolonnām
+// Ja JEBKURA no triggerCols satur "+", ieraksta dateCol un timeCol
+// Pārrakstīšana NAV atļauta — pirmais laiks paliek
+const MULTI_TRIGGER_CONFIG = {
+  "Bloki": { triggerCols: ["K", "L"], dateCol: "M", timeCol: "N" }
+};
+
 let isProcessing = false;
 let listenerRegistered = false;
 
@@ -30,10 +37,7 @@ Office.onReady(async (info) => {
 // ============================================================
 
 async function registerGlobalListener() {
-  if (listenerRegistered) {
-    console.log("ZAZA: Klausītājs jau reģistrēts.");
-    return;
-  }
+  if (listenerRegistered) return;
   try {
     await Excel.run(async (context) => {
       context.workbook.worksheets.onChanged.add(handleChange);
@@ -47,95 +51,38 @@ async function registerGlobalListener() {
 }
 
 // ============================================================
-// GALVENĀ LOĢIKA
+// GALVENĀ LOĢIKA — NOSAKA KURA LAPA UN KONFIGURĀCIJA
 // ============================================================
 
 async function handleChange(event) {
-  // Infinite loop aizsardzība
   if (isProcessing) return;
-
-  // Tikai lietotāja ievade
   if (event.changeType !== "RangeEdited") return;
 
-  // Notīra adresi
   let address = event.address;
   if (address.includes("!")) address = address.split("!")[1];
   address = address.replace(/\$/g, "");
 
-  // Pārbauda vai kolonna ir AJ
   const firstCell = address.split(":")[0];
   const colLetter = firstCell.replace(/[0-9]/g, "").toUpperCase();
-  if (colLetter !== TRIGGER_COL) return;
-
-  console.log("ZAZA: Izmaiņa AJ kolonnā — adrese: " + address);
 
   await Excel.run(async (context) => {
-    // Iegūst lapas nosaukumu
     const sheet = context.workbook.worksheets.getActiveWorksheet();
     sheet.load("name");
     await context.sync();
-
     const sheetName = sheet.name.trim();
-    console.log("ZAZA: Lapa — " + sheetName);
 
-    const config = SHEET_CONFIG[sheetName];
-    if (!config) {
-      console.log("ZAZA: Lapa nav konfigurēta — ignorē.");
+    // Pārbauda single trigger lapas (AJ kolonna)
+    const singleConfig = SINGLE_TRIGGER_CONFIG[sheetName];
+    if (singleConfig && colLetter === singleConfig.triggerCol) {
+      await processSingleTrigger(context, sheet, address, singleConfig);
       return;
     }
 
-    // Ielādē mainītās šūnas
-    const changedRange = sheet.getRange(address);
-    changedRange.load(["values", "rowIndex", "rowCount"]);
-    await context.sync();
-
-    // Savāc rindas ar "+"
-    const rowsToProcess = [];
-    for (let i = 0; i < changedRange.rowCount; i++) {
-      const raw = changedRange.values[i][0];
-      const val = String(raw === null || raw === undefined ? "" : raw).trim();
-      if (val === "+") {
-        rowsToProcess.push(changedRange.rowIndex + i + 1);
-      }
-    }
-
-    if (rowsToProcess.length === 0) {
-      console.log("ZAZA: Nav '+' vērtību — ignorē.");
+    // Pārbauda multi trigger lapas (K vai L kolonna)
+    const multiConfig = MULTI_TRIGGER_CONFIG[sheetName];
+    if (multiConfig && multiConfig.triggerCols.includes(colLetter)) {
+      await processMultiTrigger(context, sheet, address, colLetter, multiConfig);
       return;
-    }
-
-    console.log("ZAZA: Apstrādā " + rowsToProcess.length + " rind(as): " + rowsToProcess.join(", "));
-
-    // Datums un laiks kā teksts
-    const now      = new Date();
-    const dateText = formatDate(now);
-    const timeText = formatTime(now);
-
-    // Raksta vērtības
-    isProcessing = true;
-    try {
-      for (const rowNum of rowsToProcess) {
-        const dateCell = sheet.getRange(config.dateCol + rowNum);
-        const timeCell = sheet.getRange(config.timeCol + rowNum);
-        dateCell.load("values");
-        timeCell.load("values");
-        await context.sync();
-
-        // Pārbauda vai jau ir dati
-        const existingVal = String(dateCell.values[0][0]).trim();
-        if (existingVal !== "" && existingVal !== "0" && existingVal !== "false") {
-          console.log("ZAZA: Rinda " + rowNum + " — datums jau eksistē, izlaižam.");
-          continue;
-        }
-
-        // Ieraksta
-        dateCell.values = [[dateText]];
-        timeCell.values = [[timeText]];
-        console.log("ZAZA: ✅ Rinda " + rowNum + " → " + config.dateCol + "=" + dateText + " | " + config.timeCol + "=" + timeText);
-      }
-      await context.sync();
-    } finally {
-      isProcessing = false;
     }
 
   }).catch((e) => {
@@ -145,11 +92,107 @@ async function handleChange(event) {
 }
 
 // ============================================================
+// SINGLE TRIGGER — AJ kolonna (AUDZESANA, CNC, utt.)
+// ============================================================
+
+async function processSingleTrigger(context, sheet, address, config) {
+  const changedRange = sheet.getRange(address);
+  changedRange.load(["values", "rowIndex", "rowCount"]);
+  await context.sync();
+
+  const rowsToProcess = [];
+  for (let i = 0; i < changedRange.rowCount; i++) {
+    const val = String(changedRange.values[i][0] ?? "").trim();
+    if (val === "+") rowsToProcess.push(changedRange.rowIndex + i + 1);
+  }
+  if (rowsToProcess.length === 0) return;
+
+  const now      = new Date();
+  const dateText = formatDate(now);
+  const timeText = formatTime(now);
+
+  isProcessing = true;
+  try {
+    for (const rowNum of rowsToProcess) {
+      const dateCell = sheet.getRange(config.dateCol + rowNum);
+      const timeCell = sheet.getRange(config.timeCol + rowNum);
+      dateCell.load("values");
+      timeCell.load("values");
+      await context.sync();
+
+      const existing = String(dateCell.values[0][0] ?? "").trim();
+      if (existing !== "" && existing !== "0" && existing !== "false") {
+        console.log("ZAZA: Rinda " + rowNum + " — datums jau eksistē, izlaižam.");
+        continue;
+      }
+
+      dateCell.values = [[dateText]];
+      timeCell.values = [[timeText]];
+      console.log("ZAZA: ✅ " + sheet.name + " rinda " + rowNum + " → " + config.dateCol + "=" + dateText + " | " + config.timeCol + "=" + timeText);
+    }
+    await context.sync();
+  } finally {
+    isProcessing = false;
+  }
+}
+
+// ============================================================
+// MULTI TRIGGER — K vai L kolonna (Bloki lapa)
+// Loģika: ja M jau ir aizpildīts — NEPĀRRAKSTA (pirmais laiks paliek)
+// ============================================================
+
+async function processMultiTrigger(context, sheet, address, changedCol, config) {
+  const changedRange = sheet.getRange(address);
+  changedRange.load(["values", "rowIndex", "rowCount"]);
+  await context.sync();
+
+  // Savāc rindas kur izmainītajā kolonnā ir "+"
+  const rowsToProcess = [];
+  for (let i = 0; i < changedRange.rowCount; i++) {
+    const val = String(changedRange.values[i][0] ?? "").trim();
+    if (val === "+") rowsToProcess.push(changedRange.rowIndex + i + 1);
+  }
+  if (rowsToProcess.length === 0) return;
+
+  const now      = new Date();
+  const dateText = formatDate(now);
+  const timeText = formatTime(now);
+
+  isProcessing = true;
+  try {
+    for (const rowNum of rowsToProcess) {
+      const dateCell = sheet.getRange(config.dateCol + rowNum);
+      const timeCell = sheet.getRange(config.timeCol + rowNum);
+      dateCell.load("values");
+      timeCell.load("values");
+      await context.sync();
+
+      // Ja M kolonnā jau ir datums — NEPĀRRAKSTA (pirmais + laiks paliek)
+      const existingDate = String(dateCell.values[0][0] ?? "").trim();
+      if (existingDate !== "" && existingDate !== "0" && existingDate !== "false") {
+        console.log("ZAZA: Bloki rinda " + rowNum + " — datums jau eksistē (pirmais laiks saglabāts), izlaižam.");
+        continue;
+      }
+
+      // Ieraksta datumu un laiku
+      dateCell.values = [[dateText]];
+      timeCell.values = [[timeText]];
+      console.log("ZAZA: ✅ Bloki rinda " + rowNum + " (trigera kol. " + changedCol + ") → M=" + dateText + " | N=" + timeText);
+    }
+    await context.sync();
+  } finally {
+    isProcessing = false;
+  }
+}
+
+// ============================================================
 // STATUS FUNKCIJA (ribbon poga)
 // ============================================================
 
 function showStatus(event) {
-  console.log("ZAZA Timestamp aktīvs. Konfigurētās lapas: " + Object.keys(SHEET_CONFIG).join(", "));
+  console.log("ZAZA Timestamp aktīvs.");
+  console.log("Single trigger lapas: " + Object.keys(SINGLE_TRIGGER_CONFIG).join(", "));
+  console.log("Multi trigger lapas: " + Object.keys(MULTI_TRIGGER_CONFIG).join(", "));
   if (event && event.completed) event.completed();
 }
 
