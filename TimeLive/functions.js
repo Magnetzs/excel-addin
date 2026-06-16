@@ -1,9 +1,8 @@
 // ============================================================
-// ZAZA TIMBER — Timestamp Add-in v1.2
-// Shared Runtime — fona darbība
+// ZAZA TIMBER — Timestamp Add-in v1.4
+// Shared Runtime — Pilnīgi automātiska fona darbība
 // ============================================================
 
-// Konfigurācija lapām ar vienu trigera kolonnu (AJ)
 const SINGLE_TRIGGER_CONFIG = {
   "AUDZESANA":                  { triggerCol: "AJ", dateCol: "AX", timeCol: "AY" },
   "ČETRPUSĪGĀ_ĒVELE_LĪMĒŠANA": { triggerCol: "AJ", dateCol: "AZ", timeCol: "BA" },
@@ -11,9 +10,6 @@ const SINGLE_TRIGGER_CONFIG = {
   "CNC":                        { triggerCol: "AL", dateCol: "BC", timeCol: "BD" }
 };
 
-// Konfigurācija lapām ar vairākām trigera kolonnām
-// Ja JEBKURA no triggerCols satur "+", ieraksta dateCol un timeCol
-// Pārrakstīšana NAV atļauta — pirmais laiks paliek
 const MULTI_TRIGGER_CONFIG = {
   "Bloki": { triggerCols: ["K", "L"], dateCol: "M", timeCol: "N" }
 };
@@ -22,28 +18,48 @@ let isProcessing = false;
 let listenerRegistered = false;
 
 // ============================================================
-// INICIALIZĀCIJA
+// INICIALIZĀCIJA — izsaucas automātiski
 // ============================================================
 
 Office.onReady(async (info) => {
-  console.log("ZAZA: Office.onReady - host:", info.host);
+  console.log("ZAZA: Office.onReady fired.");
   if (info.host === Office.HostType.Excel) {
+
+    // GALVENAIS — liek Excel VIENMĒR ielādēt add-in fonā
+    // bez lietotāja darbībām katru reizi atverot Excel
+    try {
+      await Office.addin.setStartupBehavior(Office.StartupBehavior.load);
+      console.log("ZAZA: ✅ AutoStart ieslēgts — turpmāk darbojas automātiski.");
+    } catch (e) {
+      console.warn("ZAZA: setStartupBehavior nav atbalstīts šajā vidē:", e.message);
+    }
+
     await registerGlobalListener();
   }
 });
+
+// WorkbookActivated papildu drošībai (Desktop)
+async function onWorkbookOpen(event) {
+  console.log("ZAZA: WorkbookActivated.");
+  await registerGlobalListener();
+  if (event && event.completed) event.completed();
+}
 
 // ============================================================
 // REĢISTRĒ GLOBĀLO KLAUSĪTĀJU
 // ============================================================
 
 async function registerGlobalListener() {
-  if (listenerRegistered) return;
+  if (listenerRegistered) {
+    console.log("ZAZA: Klausītājs jau aktīvs.");
+    return;
+  }
   try {
     await Excel.run(async (context) => {
       context.workbook.worksheets.onChanged.add(handleChange);
       await context.sync();
       listenerRegistered = true;
-      console.log("ZAZA: ✅ Globālais klausītājs aktīvs.");
+      console.log("ZAZA: ✅ Globālais klausītājs reģistrēts.");
     });
   } catch (e) {
     console.error("ZAZA: Kļūda reģistrējot klausītāju:", e);
@@ -51,7 +67,7 @@ async function registerGlobalListener() {
 }
 
 // ============================================================
-// GALVENĀ LOĢIKA — NOSAKA KURA LAPA UN KONFIGURĀCIJA
+// GALVENĀ LOĢIKA
 // ============================================================
 
 async function handleChange(event) {
@@ -71,14 +87,12 @@ async function handleChange(event) {
     await context.sync();
     const sheetName = sheet.name.trim();
 
-    // Pārbauda single trigger lapas (AJ kolonna)
     const singleConfig = SINGLE_TRIGGER_CONFIG[sheetName];
     if (singleConfig && colLetter === singleConfig.triggerCol) {
       await processSingleTrigger(context, sheet, address, singleConfig);
       return;
     }
 
-    // Pārbauda multi trigger lapas (K vai L kolonna)
     const multiConfig = MULTI_TRIGGER_CONFIG[sheetName];
     if (multiConfig && multiConfig.triggerCols.includes(colLetter)) {
       await processMultiTrigger(context, sheet, address, colLetter, multiConfig);
@@ -92,7 +106,7 @@ async function handleChange(event) {
 }
 
 // ============================================================
-// SINGLE TRIGGER — AJ kolonna (AUDZESANA, CNC, utt.)
+// SINGLE TRIGGER apstrāde
 // ============================================================
 
 async function processSingleTrigger(context, sheet, address, config) {
@@ -117,14 +131,10 @@ async function processSingleTrigger(context, sheet, address, config) {
       const dateCell = sheet.getRange(config.dateCol + rowNum);
       const timeCell = sheet.getRange(config.timeCol + rowNum);
       dateCell.load("values");
-      timeCell.load("values");
       await context.sync();
 
       const existing = String(dateCell.values[0][0] ?? "").trim();
-      if (existing !== "" && existing !== "0" && existing !== "false") {
-        console.log("ZAZA: Rinda " + rowNum + " — datums jau eksistē, izlaižam.");
-        continue;
-      }
+      if (existing !== "" && existing !== "0" && existing !== "false") continue;
 
       dateCell.values = [[dateText]];
       timeCell.values = [[timeText]];
@@ -137,8 +147,7 @@ async function processSingleTrigger(context, sheet, address, config) {
 }
 
 // ============================================================
-// MULTI TRIGGER — K vai L kolonna (Bloki lapa)
-// Loģika: ja M jau ir aizpildīts — NEPĀRRAKSTA (pirmais laiks paliek)
+// MULTI TRIGGER apstrāde (Bloki lapa)
 // ============================================================
 
 async function processMultiTrigger(context, sheet, address, changedCol, config) {
@@ -146,7 +155,6 @@ async function processMultiTrigger(context, sheet, address, changedCol, config) 
   changedRange.load(["values", "rowIndex", "rowCount"]);
   await context.sync();
 
-  // Savāc rindas kur izmainītajā kolonnā ir "+"
   const rowsToProcess = [];
   for (let i = 0; i < changedRange.rowCount; i++) {
     const val = String(changedRange.values[i][0] ?? "").trim();
@@ -164,20 +172,14 @@ async function processMultiTrigger(context, sheet, address, changedCol, config) 
       const dateCell = sheet.getRange(config.dateCol + rowNum);
       const timeCell = sheet.getRange(config.timeCol + rowNum);
       dateCell.load("values");
-      timeCell.load("values");
       await context.sync();
 
-      // Ja M kolonnā jau ir datums — NEPĀRRAKSTA (pirmais + laiks paliek)
-      const existingDate = String(dateCell.values[0][0] ?? "").trim();
-      if (existingDate !== "" && existingDate !== "0" && existingDate !== "false") {
-        console.log("ZAZA: Bloki rinda " + rowNum + " — datums jau eksistē (pirmais laiks saglabāts), izlaižam.");
-        continue;
-      }
+      const existing = String(dateCell.values[0][0] ?? "").trim();
+      if (existing !== "" && existing !== "0" && existing !== "false") continue;
 
-      // Ieraksta datumu un laiku
       dateCell.values = [[dateText]];
       timeCell.values = [[timeText]];
-      console.log("ZAZA: ✅ Bloki rinda " + rowNum + " (trigera kol. " + changedCol + ") → M=" + dateText + " | N=" + timeText);
+      console.log("ZAZA: ✅ Bloki rinda " + rowNum + " (kol. " + changedCol + ") → M=" + dateText + " | N=" + timeText);
     }
     await context.sync();
   } finally {
@@ -186,30 +188,26 @@ async function processMultiTrigger(context, sheet, address, changedCol, config) 
 }
 
 // ============================================================
-// STATUS FUNKCIJA (ribbon poga)
+// STATUS POGA
 // ============================================================
 
 function showStatus(event) {
-  console.log("ZAZA Timestamp aktīvs.");
-  console.log("Single trigger lapas: " + Object.keys(SINGLE_TRIGGER_CONFIG).join(", "));
-  console.log("Multi trigger lapas: " + Object.keys(MULTI_TRIGGER_CONFIG).join(", "));
+  console.log("ZAZA Timestamp v1.4 — Klausītājs: " + (listenerRegistered ? "✅ aktīvs" : "❌ neaktīvs"));
   if (event && event.completed) event.completed();
 }
 
 // ============================================================
-// DATUMA UN LAIKA FORMATĒŠANA
+// FORMATĒŠANA
 // ============================================================
 
 function formatDate(date) {
-  const d = String(date.getDate()).padStart(2, "0");
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const y = date.getFullYear();
-  return d + "." + m + "." + y;
+  return String(date.getDate()).padStart(2, "0") + "." +
+         String(date.getMonth() + 1).padStart(2, "0") + "." +
+         date.getFullYear();
 }
 
 function formatTime(date) {
-  const h  = String(date.getHours()).padStart(2, "0");
-  const mi = String(date.getMinutes()).padStart(2, "0");
-  const s  = String(date.getSeconds()).padStart(2, "0");
-  return h + ":" + mi + ":" + s;
+  return String(date.getHours()).padStart(2, "0") + ":" +
+         String(date.getMinutes()).padStart(2, "0") + ":" +
+         String(date.getSeconds()).padStart(2, "0");
 }
