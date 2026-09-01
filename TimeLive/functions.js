@@ -34,7 +34,7 @@ const SINGLE_TRIGGER_CONFIG = {
   "AUDZESANA":                  { triggerCol: "AJ", dateCol: "AX", timeCol: "AY" },
   "ČETRPUSĪGĀ_ĒVELE_LĪMĒŠANA": { triggerCol: "AJ", dateCol: "AZ", timeCol: "BA" },
   "BIEZUMĒVELE":                { triggerCol: "AJ", dateCol: "AW", timeCol: "AX" },
-  "CNC":                        { triggerCol: "AL", dateCol: "BC", timeCol: "BD" }
+  "CNC":                        { triggerCol: "AL", dateCol: "BM", timeCol: "BN" }
 };
 
 const MULTI_TRIGGER_CONFIG = {
